@@ -7,7 +7,7 @@
 <title>Attendance Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
-:root{--navy:#152b59;--blue:#1677d2;--green:#119c62;--orange:#f59e0b;--red:#e64a3c;--purple:#805ad5;--paper:#f3f7ff;--line:#dce4ef;--ink:#172033;--muted:#64748b}
+:root{--navy:#152b59;--blue:#1677d2;--green:#119c62;--orange:#f59e0b;--red:#e64a3c;--purple:#805ad5;--rose:#be123c;--paper:#f3f7ff;--line:#dce4ef;--ink:#172033;--muted:#64748b}
 *{box-sizing:border-box}
 body{margin:0;color:var(--ink);background:var(--paper);font-family:Segoe UI,Roboto,Arial,sans-serif}
 header{padding:26px max(18px,calc((100% - 1180px)/2));background:linear-gradient(120deg,#172e60 0%,#1769aa 52%,#16a5a0 100%);color:#fff}
@@ -25,11 +25,12 @@ button:hover{filter:brightness(.92)}
 #reset{background:#64748b}
 .status{min-height:23px;margin:13px 2px 0;color:var(--muted);font-size:.9rem}
 .status.error{color:var(--red);font-weight:600}
-.kpis{display:grid;grid-template-columns:repeat(7,1fr);gap:14px;margin:19px 0}
+.kpis{display:grid;grid-template-columns:repeat(8,1fr);gap:14px;margin:19px 0}
 .card{padding:17px;border-top:4px solid var(--blue);background:linear-gradient(135deg,#fff,#edf6ff)}
 .card.present{border-color:var(--green);background:linear-gradient(135deg,#fff,#e4f8ed)}
 .card.absent{border-color:var(--red);background:linear-gradient(135deg,#fff,#ffebe8)}
 .card.late{border-color:var(--orange);background:linear-gradient(135deg,#fff,#fff3d9)}
+.card.deduction{border-color:var(--rose);background:linear-gradient(135deg,#fff,#ffe4ec)}
 .card.leave{border-color:var(--purple);background:linear-gradient(135deg,#fff,#f0eaff)}
 .card.offday{border-color:#0891b2;background:linear-gradient(135deg,#fff,#dff7fb)}
 .card.rate{border-color:#0ea5a5;background:linear-gradient(135deg,#fff,#def7f6)}
@@ -37,6 +38,7 @@ button.card{min-height:0;width:100%;color:var(--ink);text-align:left;border:1px 
 button.card.present{border-top-color:var(--green)}
 button.card.absent{border-top-color:var(--red)}
 button.card.late{border-top-color:var(--orange)}
+button.card.deduction{border-top-color:var(--rose)}
 button.card.leave{border-top-color:var(--purple)}
 button.card.offday{border-top-color:#0891b2}
 button.card:hover,button.card.active{transform:translateY(-2px);box-shadow:0 7px 18px #1d4d7a22;outline:3px solid #bfdbfe}
@@ -84,7 +86,7 @@ tr.detail td{background:#f8fafc;white-space:normal;padding:10px 18px 14px}
 .detail-item{white-space:nowrap}
 .empty{padding:35px 18px;color:var(--muted);text-align:center}
 .attendance-message{margin:15px 0 0;padding:10px 14px;border-left:4px solid var(--blue);border-radius:8px;background:#eaf4fc;color:#164b76;font-weight:600}
-@media(max-width:1050px){.filters{grid-template-columns:repeat(3,minmax(0,1fr))}.kpis{grid-template-columns:repeat(3,1fr)}.grid{grid-template-columns:1fr 1fr}.grid > :nth-child(2){grid-column:span 2}}
+@media(max-width:1050px){.filters{grid-template-columns:repeat(3,minmax(0,1fr))}.kpis{grid-template-columns:repeat(4,1fr)}.grid{grid-template-columns:1fr 1fr}.grid > :nth-child(2){grid-column:span 2}}
 @media(max-width:760px){.filters{grid-template-columns:1fr 1fr}.filters button{grid-column:span 1}.kpis{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}.grid > :nth-child(2){grid-column:auto}}
 </style>
 </head>
@@ -106,6 +108,7 @@ tr.detail td{background:#f8fafc;white-space:normal;padding:10px 18px 14px}
 <button class="card present" id="presentCard" data-category="present" type="button"><p>Present</p><strong id="present">0</strong></button>
 <button class="card absent" id="absentCard" data-category="absent" type="button"><p>Absent</p><strong id="absent">0</strong></button>
 <button class="card late" id="lateCard" data-category="late" type="button"><p>Late</p><strong id="late">0</strong></button>
+<button class="card deduction" id="deductionCard" data-category="deduction" type="button" title="Entry at 10:06 AM or later"><p>Deduction</p><strong id="deduction">0</strong></button>
 <button class="card leave" id="leaveCard" data-category="leave" type="button"><p>On leave</p><strong id="leave">0</strong></button>
 <button class="card offday" id="offdayCard" data-category="offday" type="button"><p>Off day</p><strong id="offday">0</strong></button>
 <div class="card rate"><p>Attendance rate</p><strong id="rate">—</strong></div>
@@ -138,6 +141,8 @@ const hiddenDesignations = [
   'Office Assistant',
   'Office Asst. cum Messenger'
 ];
+/* Deduction: entry time at or after this time (10:06 AM). Accepted late entries are not deducted. */
+const DEDUCTION_FROM = 10*60 + 6;
 const fields = {
   date: ['date','attendance date','date of attendance'],
   id: ['employee id','employee code','staff id','id','emp id','empid','emp code'],
@@ -189,6 +194,18 @@ function attendanceCategory(row){
   return '';
 }
 function lateAccepted(row){ return /\baccepted\b/i.test(text(row.entryTime)); }
+function isDeduction(row){
+  if (lateAccepted(row)) return false;
+  const c = attendanceCategory(row);
+  if (c === 'absent' || c === 'leave' || c === 'offday') return false;
+  const minutes = entryMinutes(row.entryTime);
+  return minutes !== null && minutes >= DEDUCTION_FROM;
+}
+function matchesCategory(row){
+  if (!state.category) return true;
+  if (state.category === 'deduction') return isDeduction(row);
+  return attendanceCategory(row) === state.category;
+}
 function statusClass(row){ return attendanceCategory(row); }
 function isPresent(row){ return attendanceCategory(row) === 'present'; }
 function isLate(row){ return attendanceCategory(row) === 'late'; }
@@ -250,12 +267,12 @@ function updateDateMessage(){ const from = $('dateFrom').value; const to = $('da
   if (from && from === to){ $('attendanceMessage').textContent = `This dashboard is showing attendance for ${displayDate(from)}.`; return; }
   if (from && to){ $('attendanceMessage').textContent = `This dashboard is showing attendance from ${displayDate(from)} to ${displayDate(to)}.`; return; }
   $('attendanceMessage').textContent = 'This dashboard is showing current attendance data.'; }
+function searchTextOf(r){ return key([r.name,r.id,r.department,r.designation,r.status,text(r.entryTime),attendanceCategory(r),isDeduction(r)?'deduction':''].join(' ')); }
 function baseFiltered(){ const from = $('dateFrom').value; const to = $('dateTo').value; const department = $('department').value; const q = key($('search').value);
   return state.data.filter(r => {
     const dateOK = (!from || r.date >= from) && (!to || r.date <= to);
     const departmentOK = !department || r.department === department;
-    const searchText = key([r.name,r.id,r.department,r.designation,r.status,text(r.entryTime),attendanceCategory(r)].join(' '));
-    const searchOK = !q || searchText.includes(q);
+    const searchOK = !q || searchTextOf(r).includes(q);
     return dateOK && departmentOK && searchOK; }); }
 function workingDates(count=3){ const byDate = {};
   state.data.forEach(r => { if (!r.date) return; if (!byDate[r.date]) byDate[r.date] = {total:0, offday:0}; byDate[r.date].total++; if (attendanceCategory(r) === 'offday') byDate[r.date].offday++; });
@@ -263,16 +280,16 @@ function workingDates(count=3){ const byDate = {};
 function chartFiltered(){ const department = $('department').value; const q = key($('search').value);
   return state.data.filter(r => {
     const departmentOK = !department || r.department === department;
-    const searchText = key([r.name,r.id,r.department,r.designation,r.status,text(r.entryTime),attendanceCategory(r)].join(' '));
-    const searchOK = !q || searchText.includes(q);
-    return departmentOK && searchOK; }).filter(r => !state.category || attendanceCategory(r) === state.category); }
-function filtered(){ return baseFiltered().filter(r => !state.category || attendanceCategory(r) === state.category)
+    const searchOK = !q || searchTextOf(r).includes(q);
+    return departmentOK && searchOK; }).filter(matchesCategory); }
+function filtered(){ return baseFiltered().filter(matchesCategory)
   .sort((a,b) => b.date.localeCompare(a.date) || a.department.localeCompare(b.department) || a.name.localeCompare(b.name)); }
 function render(){
   const base = baseFiltered(); const rows = filtered();
   const present = base.filter(isPresent).length;
   const absent = base.filter(r => attendanceCategory(r) === 'absent').length;
   const late = base.filter(isLate).length;
+  const deduction = base.filter(isDeduction).length;
   const leave = base.filter(isLeave).length;
   const offday = base.filter(r => attendanceCategory(r) === 'offday').length;
   const uniqueStaff = new Set(base.map(staffIdentity).filter(Boolean));
@@ -280,9 +297,10 @@ function render(){
   const recognised = present + late + absent;
   const rate = recognised ? `${Math.round(((present+late)/recognised)*100)}%` : '—';
   $('total').textContent = totalStaff; $('present').textContent = present; $('absent').textContent = absent;
-  $('late').textContent = late; $('leave').textContent = leave; $('offday').textContent = offday; $('rate').textContent = rate;
+  $('late').textContent = late; $('deduction').textContent = deduction; $('leave').textContent = leave; $('offday').textContent = offday; $('rate').textContent = rate;
   const people = groupRows(rows).length;
-  $('count').textContent = (people !== rows.length ? `${people} staff · ` : '') + `${rows.length} record${rows.length === 1 ? '' : 's'}` + (state.category ? ` — ${state.category}` : '');
+  const label = state.category === 'deduction' ? 'deduction (entry 10:06 AM or later)' : state.category;
+  $('count').textContent = (people !== rows.length ? `${people} staff · ` : '') + `${rows.length} record${rows.length === 1 ? '' : 's'}` + (state.category ? ` — ${label}` : '');
   updateDateMessage();
   document.querySelectorAll('[data-category]').forEach(card => { card.classList.toggle('active', card.dataset.category === state.category); });
   renderTable(rows); renderBars(chartFiltered()); renderDesignationSummary(base); renderLegend(rows);
