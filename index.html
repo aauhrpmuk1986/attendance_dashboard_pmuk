@@ -108,7 +108,7 @@ tr.detail td{background:#f8fafc;white-space:normal;padding:10px 18px 14px}
 <button class="card present" id="presentCard" data-category="present" type="button"><p>Present</p><strong id="present">0</strong></button>
 <button class="card absent" id="absentCard" data-category="absent" type="button"><p>Absent</p><strong id="absent">0</strong></button>
 <button class="card late" id="lateCard" data-category="late" type="button"><p>Late</p><strong id="late">0</strong></button>
-<button class="card deduction" id="deductionCard" data-category="deduction" type="button" title="Entry at 10:06 AM or later"><p>Deduction</p><strong id="deduction">0</strong></button>
+<button class="card deduction" id="deductionCard" data-category="deduction" type="button" title="Staff with entry at 10:06 AM or later on 3 or more days this month"><p>Deduction (staff)</p><strong id="deduction">0</strong></button>
 <button class="card leave" id="leaveCard" data-category="leave" type="button"><p>On leave</p><strong id="leave">0</strong></button>
 <button class="card offday" id="offdayCard" data-category="offday" type="button"><p>Off day</p><strong id="offday">0</strong></button>
 <div class="card rate"><p>Attendance rate</p><strong id="rate">—</strong></div>
@@ -143,6 +143,8 @@ const hiddenDesignations = [
 ];
 /* Deduction: entry time at or after this time (10:06 AM). Accepted late entries are not deducted. */
 const DEDUCTION_FROM = 10*60 + 6;
+/* Deduction list shows only staff with at least this many such days (counted from the 1st of the From date's month to the To date). */
+const DEDUCTION_MIN_DAYS = 3;
 const fields = {
   date: ['date','attendance date','date of attendance'],
   id: ['employee id','employee code','staff id','id','emp id','empid','emp code'],
@@ -205,6 +207,17 @@ function matchesCategory(row){
   if (!state.category) return true;
   if (state.category === 'deduction') return isDeduction(row);
   return attendanceCategory(row) === state.category;
+}
+function deptSearchOK(r){ const department = $('department').value; const q = key($('search').value);
+  return (!department || r.department === department) && (!q || searchTextOf(r).includes(q)); }
+/* Records at 10:06 AM or later, only for staff who have DEDUCTION_MIN_DAYS or more such days in the window */
+function deductionRows(){
+  const from = $('dateFrom').value; const end = $('dateTo').value;
+  const start = from ? from.slice(0,8) + '01' : '';
+  const candidates = state.data.filter(r => r.date && (!start || r.date >= start) && (!end || r.date <= end) && deptSearchOK(r) && isDeduction(r));
+  const days = new Map();
+  candidates.forEach(r => { const id = staffIdentity(r); if (!id) return; if (!days.has(id)) days.set(id, new Set()); days.get(id).add(r.date); });
+  return candidates.filter(r => { const s = days.get(staffIdentity(r)); return s && s.size >= DEDUCTION_MIN_DAYS; });
 }
 function statusClass(row){ return attendanceCategory(row); }
 function isPresent(row){ return attendanceCategory(row) === 'present'; }
@@ -277,19 +290,19 @@ function baseFiltered(){ const from = $('dateFrom').value; const to = $('dateTo'
 function workingDates(count=3){ const byDate = {};
   state.data.forEach(r => { if (!r.date) return; if (!byDate[r.date]) byDate[r.date] = {total:0, offday:0}; byDate[r.date].total++; if (attendanceCategory(r) === 'offday') byDate[r.date].offday++; });
   return Object.entries(byDate).filter(([,n]) => n.offday < n.total/2).map(([d]) => d).sort().slice(-count); }
-function chartFiltered(){ const department = $('department').value; const q = key($('search').value);
+function chartFiltered(){ if (state.category === 'deduction') return deductionRows(); const department = $('department').value; const q = key($('search').value);
   return state.data.filter(r => {
     const departmentOK = !department || r.department === department;
     const searchOK = !q || searchTextOf(r).includes(q);
     return departmentOK && searchOK; }).filter(matchesCategory); }
-function filtered(){ return baseFiltered().filter(matchesCategory)
+function filtered(){ return (state.category === 'deduction' ? deductionRows() : baseFiltered().filter(matchesCategory))
   .sort((a,b) => b.date.localeCompare(a.date) || a.department.localeCompare(b.department) || a.name.localeCompare(b.name)); }
 function render(){
   const base = baseFiltered(); const rows = filtered();
   const present = base.filter(isPresent).length;
   const absent = base.filter(r => attendanceCategory(r) === 'absent').length;
   const late = base.filter(isLate).length;
-  const deduction = base.filter(isDeduction).length;
+  const deduction = new Set(deductionRows().map(staffIdentity).filter(Boolean)).size;
   const leave = base.filter(isLeave).length;
   const offday = base.filter(r => attendanceCategory(r) === 'offday').length;
   const uniqueStaff = new Set(base.map(staffIdentity).filter(Boolean));
@@ -299,7 +312,7 @@ function render(){
   $('total').textContent = totalStaff; $('present').textContent = present; $('absent').textContent = absent;
   $('late').textContent = late; $('deduction').textContent = deduction; $('leave').textContent = leave; $('offday').textContent = offday; $('rate').textContent = rate;
   const people = groupRows(rows).length;
-  const label = state.category === 'deduction' ? 'deduction (entry 10:06 AM or later)' : state.category;
+  const label = state.category === 'deduction' ? `deduction (entry 10:06 AM or later, ${DEDUCTION_MIN_DAYS}+ days this month)` : state.category;
   $('count').textContent = (people !== rows.length ? `${people} staff · ` : '') + `${rows.length} record${rows.length === 1 ? '' : 's'}` + (state.category ? ` — ${label}` : '');
   updateDateMessage();
   document.querySelectorAll('[data-category]').forEach(card => { card.classList.toggle('active', card.dataset.category === state.category); });
