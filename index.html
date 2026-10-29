@@ -63,6 +63,7 @@ h2{margin:0 0 15px;font-size:1.05rem}
 .count-leave{color:var(--purple);font-weight:800}
 .table-panel{overflow:hidden}
 .table-title{padding:18px 18px 10px;display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+#count{font-weight:700;color:var(--ink);opacity:1}
 .table-wrap{overflow:auto;max-height:500px}
 table{width:100%;border-collapse:collapse;font-size:.92rem}
 th,td{padding:12px 18px;border-top:1px solid var(--line);text-align:left;white-space:nowrap}
@@ -108,7 +109,7 @@ tr.detail td{background:#f8fafc;white-space:normal;padding:10px 18px 14px}
 <button class="card present" id="presentCard" data-category="present" type="button"><p>Present</p><strong id="present">0</strong></button>
 <button class="card absent" id="absentCard" data-category="absent" type="button"><p>Absent</p><strong id="absent">0</strong></button>
 <button class="card late" id="lateCard" data-category="late" type="button"><p>Late</p><strong id="late">0</strong></button>
-<button class="card deduction" id="deductionCard" data-category="deduction" type="button" title="Staff with entry at 10:06 AM or later on 3 or more days this month"><p>Deduction (staff)</p><strong id="deduction">0</strong></button>
+<button class="card deduction" id="deductionCard" data-category="deduction" type="button" title="Staff with entry at 10:06 AM or later on 3 or more days in the selected dates"><p>Deduction (staff)</p><strong id="deduction">0</strong></button>
 <button class="card leave" id="leaveCard" data-category="leave" type="button"><p>On leave</p><strong id="leave">0</strong></button>
 <button class="card offday" id="offdayCard" data-category="offday" type="button"><p>Off day</p><strong id="offday">0</strong></button>
 <div class="card rate"><p>Attendance rate</p><strong id="rate">—</strong></div>
@@ -143,7 +144,7 @@ const hiddenDesignations = [
 ];
 /* Deduction: entry time at or after this time (10:06 AM). Accepted late entries are not deducted. */
 const DEDUCTION_FROM = 10*60 + 6;
-/* Deduction list shows only staff with at least this many such days (counted from the 1st of the From date's month to the To date). */
+/* Deduction list shows only staff with at least this many such days (counted within the selected From date to To date). */
 const DEDUCTION_MIN_DAYS = 3;
 const fields = {
   date: ['date','attendance date','date of attendance'],
@@ -213,7 +214,7 @@ function deptSearchOK(r){ const department = $('department').value; const q = ke
 /* Records at 10:06 AM or later, only for staff who have DEDUCTION_MIN_DAYS or more such days in the window */
 function deductionRows(){
   const from = $('dateFrom').value; const end = $('dateTo').value;
-  const start = from ? from.slice(0,8) + '01' : '';
+  const start = from;
   const candidates = state.data.filter(r => r.date && (!start || r.date >= start) && (!end || r.date <= end) && deptSearchOK(r) && isDeduction(r));
   const days = new Map();
   candidates.forEach(r => { const id = staffIdentity(r); if (!id) return; if (!days.has(id)) days.set(id, new Set()); days.get(id).add(r.date); });
@@ -312,7 +313,7 @@ function render(){
   $('total').textContent = totalStaff; $('present').textContent = present; $('absent').textContent = absent;
   $('late').textContent = late; $('deduction').textContent = deduction; $('leave').textContent = leave; $('offday').textContent = offday; $('rate').textContent = rate;
   const people = groupRows(rows).length;
-  const label = state.category === 'deduction' ? `deduction (entry 10:06 AM or later, ${DEDUCTION_MIN_DAYS}+ days this month)` : state.category;
+  const label = state.category === 'deduction' ? `deduction (entry 10:06 AM or later, ${DEDUCTION_MIN_DAYS}+ days, ${$('dateFrom').value === $('dateTo').value ? displayDate($('dateFrom').value) : displayDate($('dateFrom').value) + ' to ' + displayDate($('dateTo').value)})` : state.category;
   $('count').textContent = (people !== rows.length ? `${people} staff · ` : '') + `${rows.length} record${rows.length === 1 ? '' : 's'}` + (state.category ? ` — ${label}` : '');
   updateDateMessage();
   document.querySelectorAll('[data-category]').forEach(card => { card.classList.toggle('active', card.dataset.category === state.category); });
