@@ -6,6 +6,7 @@
 <meta name="description" content="Attendance dashboard">
 <title>Attendance Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <style>
 :root{--navy:#152b59;--blue:#1677d2;--green:#119c62;--orange:#f59e0b;--red:#e64a3c;--purple:#805ad5;--rose:#be123c;--paper:#f3f7ff;--line:#dce4ef;--ink:#172033;--muted:#64748b}
 *{box-sizing:border-box}
@@ -378,24 +379,40 @@ function summaryClick(e){
   state.tableDept = td.dataset.dept; state.category = td.dataset.cat; render();
   document.querySelector('.table-panel').scrollIntoView({behavior:'smooth', block:'start'});
 }
-function downloadExcel(){
-  if (!window.XLSX){ setStatus('The Excel library did not load. Check your internet connection and refresh.', true); return; }
+/* Excel export uses ExcelJS: files written by SheetJS 0.18.5 include a part that crashes some Excel versions. */
+const clean = v => text(v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F  ]/g, '');
+async function downloadExcel(){
+  if (!window.ExcelJS){ setStatus('The Excel export library did not load. Check your internet connection and refresh.', true); return; }
   const rows = filtered();
   if (!rows.length){ setStatus('There are no records to download for the selected filters.', true); return; }
   let lateDays = null;
   if (state.category === 'deduction'){ lateDays = new Map(); rows.forEach(r => { const id = staffIdentity(r); if (!lateDays.has(id)) lateDays.set(id, new Set()); lateDays.get(id).add(r.date); }); }
-  const out = rows.map(r => {
-    const o = { 'Date': displayDate(r.date), 'Staff name': r.name, 'Staff ID': r.id, 'Department': r.department, 'Designation': r.designation, 'Entry time': formatEntryTime(r.entryTime) || text(r.entryTime), 'Status': displayStatus(r) };
-    if (lateDays) o['Days at 10:06 AM or later'] = lateDays.get(staffIdentity(r)).size;
-    return o; });
-  const ws = XLSX.utils.json_to_sheet(out);
-  ws['!cols'] = [{wch:12},{wch:28},{wch:12},{wch:36},{wch:28},{wch:12},{wch:32},{wch:24}];
-  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
-  const from = $('dateFrom').value, to = $('dateTo').value;
-  const parts = ['attendance', state.category || 'all'];
-  if (state.tableDept) parts.push(state.tableDept.replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,''));
-  parts.push(from === to ? displayDate(from) : `${displayDate(from)}_to_${displayDate(to)}`);
-  XLSX.writeFile(wb, parts.join('_') + '.xlsx');
+  try {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Attendance', {views:[{state:'frozen', ySplit:1}]});
+    const columns = [
+      {header:'Date', key:'date', width:12}, {header:'Staff name', key:'name', width:28}, {header:'Staff ID', key:'id', width:14},
+      {header:'Department', key:'department', width:36}, {header:'Designation', key:'designation', width:28},
+      {header:'Entry time', key:'entry', width:12}, {header:'Status', key:'status', width:32}];
+    if (lateDays) columns.push({header:'Days at 10:06 AM or later', key:'days', width:24});
+    ws.columns = columns;
+    rows.forEach(r => {
+      const o = { date: displayDate(r.date), name: clean(r.name), id: clean(r.id), department: clean(r.department), designation: clean(r.designation),
+        entry: clean(formatEntryTime(r.entryTime) || text(r.entryTime)), status: clean(displayStatus(r)) };
+      if (lateDays) o.days = lateDays.get(staffIdentity(r)).size;
+      ws.addRow(o); });
+    const head = ws.getRow(1); head.font = {bold:true, color:{argb:'FFFFFFFF'}};
+    head.eachCell(c => { c.fill = {type:'pattern', pattern:'solid', fgColor:{argb:'FF1677D2'}}; });
+    ws.autoFilter = {from:{row:1, column:1}, to:{row:1, column:columns.length}};
+    const buffer = await wb.xlsx.writeBuffer();
+    const from = $('dateFrom').value, to = $('dateTo').value;
+    const parts = ['attendance', state.category || 'all'];
+    if (state.tableDept) parts.push(state.tableDept.replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,''));
+    parts.push(from === to ? displayDate(from) : `${displayDate(from)}_to_${displayDate(to)}`);
+    const blob = new Blob([buffer], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = parts.join('_') + '.xlsx';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  } catch (error) { setStatus('The Excel file could not be created: ' + error.message, true); console.error(error); }
 }
 function escapeHtml(value){ return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
 $('dateFrom').addEventListener('change', render);
