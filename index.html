@@ -56,13 +56,21 @@ h2{margin:0 0 15px;font-size:1.05rem}
 .designation-summary{overflow:auto;max-height:245px}
 .designation-summary table{font-size:.78rem}
 .designation-summary th,.designation-summary td{padding:8px 7px}
-.designation-summary th{position:static}
+.designation-summary th{position:sticky;top:0;z-index:1;background:#f8fafc;box-shadow:0 1px 0 var(--line)}
+.designation-summary td.click{cursor:pointer}
+.designation-summary td.click:hover{background:#eaf2fd;text-decoration:underline}
+.designation-summary tfoot td{font-weight:800;background:#f8fafc}
+.count-deduction{color:var(--rose);font-weight:800}
 .designation-summary td:first-child{white-space:normal;min-width:140px}
 .count-absent{color:var(--red);font-weight:800}
 .count-late{color:#b45309;font-weight:800}
 .count-leave{color:var(--purple);font-weight:800}
 .table-panel{overflow:hidden}
-.table-title{padding:18px 18px 10px;display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+.table-title{padding:18px 18px 10px;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
+.table-title h2{margin:0 0 4px}
+.table-actions{display:flex;gap:8px;flex-wrap:wrap}
+#download{background:var(--green)}
+#clearDept{background:#e9f2fa;color:#145282}
 #count{font-weight:700;color:var(--ink);opacity:1}
 .table-wrap{overflow:auto;max-height:500px}
 table{width:100%;border-collapse:collapse;font-size:.92rem}
@@ -117,18 +125,19 @@ tr.detail td{background:#f8fafc;white-space:normal;padding:10px 18px 14px}
 <section class="grid">
 <div class="panel chart"><h2>Attendance by date</h2><div id="bars" class="bars"></div></div>
 <div class="panel chart"><h2>Department wise summary</h2><div id="designationSummary" class="designation-summary"></div></div>
-<div class="panel chart"><h2>Status summary</h2><div id="legend" class="legend"></div></div>
+<div class="panel chart"><h2>Deduction summary</h2><div id="deductionSummary" class="designation-summary"></div></div>
 </section>
 <section class="panel table-panel">
-<div class="table-title"><h2>Attendance records</h2><span id="count" class="sub"></span></div>
-<div class="table-wrap"><table><thead><tr><th>Date</th><th>Staff name</th><th>Department</th><th>Designation</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div class="table-title"><div><h2>Attendance records</h2><span id="count" class="sub"></span></div>
+<div class="table-actions"><button id="clearDept" type="button" hidden>Show all departments</button><button id="download" type="button">Download Excel</button></div></div>
+<div class="table-wrap"><table><thead><tr><th>Date</th><th>Staff name</th><th>Staff ID</th><th>Department</th><th>Designation</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table></div>
 </section>
 </main>
 <script>
 (() => {
 'use strict';
 const $ = id => document.getElementById(id);
-const state = { data: [], category: '' };
+const state = { data: [], category: '', tableDept: '' };
 /*
   Designations hidden from the whole dashboard (cards, charts, table).
   Exact match, not case-sensitive. Delete a line to show it again.
@@ -276,7 +285,7 @@ function fillDepartments(){ const select = $('department'); const keep = select.
   select.value = keep; }
 function initialiseDates(){ const dates = [...new Set(state.data.map(r => r.date).filter(Boolean))].sort();
   const latest = dates.length ? dates[dates.length-1] : ''; $('dateFrom').value = latest; $('dateTo').value = latest; }
-function resetFilters(){ $('department').value=''; $('search').value=''; state.category=''; initialiseDates(); render(); }
+function resetFilters(){ $('department').value=''; $('search').value=''; state.category=''; state.tableDept=''; initialiseDates(); render(); }
 function updateDateMessage(){ const from = $('dateFrom').value; const to = $('dateTo').value;
   if (from && from === to){ $('attendanceMessage').textContent = `This dashboard is showing attendance for ${displayDate(from)}.`; return; }
   if (from && to){ $('attendanceMessage').textContent = `This dashboard is showing attendance from ${displayDate(from)} to ${displayDate(to)}.`; return; }
@@ -297,6 +306,7 @@ function chartFiltered(){ if (state.category === 'deduction') return deductionRo
     const searchOK = !q || searchTextOf(r).includes(q);
     return departmentOK && searchOK; }).filter(matchesCategory); }
 function filtered(){ return (state.category === 'deduction' ? deductionRows() : baseFiltered().filter(matchesCategory))
+  .filter(r => !state.tableDept || (r.department || 'Not specified') === state.tableDept)
   .sort((a,b) => b.date.localeCompare(a.date) || a.department.localeCompare(b.department) || a.name.localeCompare(b.name)); }
 function render(){
   const base = baseFiltered(); const rows = filtered();
@@ -314,13 +324,14 @@ function render(){
   $('late').textContent = late; $('deduction').textContent = deduction; $('leave').textContent = leave; $('offday').textContent = offday; $('rate').textContent = rate;
   const people = groupRows(rows).length;
   const label = state.category === 'deduction' ? `deduction (entry 10:06 AM or later, ${DEDUCTION_MIN_DAYS}+ days, ${$('dateFrom').value === $('dateTo').value ? displayDate($('dateFrom').value) : displayDate($('dateFrom').value) + ' to ' + displayDate($('dateTo').value)})` : state.category;
-  $('count').textContent = (people !== rows.length ? `${people} staff · ` : '') + `${rows.length} record${rows.length === 1 ? '' : 's'}` + (state.category ? ` — ${label}` : '');
+  $('count').textContent = (people !== rows.length ? `${people} staff · ` : '') + `${rows.length} record${rows.length === 1 ? '' : 's'}` + (state.category ? ` — ${label}` : '') + (state.tableDept ? ` · ${state.tableDept}` : '');
+  $('clearDept').hidden = !state.tableDept;
   updateDateMessage();
   document.querySelectorAll('[data-category]').forEach(card => { card.classList.toggle('active', card.dataset.category === state.category); });
-  renderTable(rows); renderBars(chartFiltered()); renderDesignationSummary(base); renderLegend(rows);
+  renderTable(rows); renderBars(chartFiltered()); renderDesignationSummary(base); renderDeductionSummary();
 }
 function renderTable(data){ const target = $('rows');
-  if (!data.length){ target.innerHTML = '<tr><td class="empty" colspan="5">No records match the selected filters.</td></tr>'; return; }
+  if (!data.length){ target.innerHTML = '<tr><td class="empty" colspan="6">No records match the selected filters.</td></tr>'; return; }
   // One row per person per status, showing the latest date.
   // `data` is already sorted newest first, so the first record seen is the latest.
   const groups = groupRows(data);
@@ -330,9 +341,9 @@ function renderTable(data){ const target = $('rows');
       ? ` <button type="button" class="times ${statusClass(r)}" data-group="${i}" aria-expanded="false" title="Show all dates">${g.length} days</button>`
       : '';
     const detail = g.length > 1
-      ? `<tr class="detail" id="detail-${i}" hidden><td colspan="5"><div class="detail-list">${g.map(x => `<span class="detail-item"><b>${displayDate(x.date)}</b> <span class="pill ${statusClass(x)}">${escapeHtml(displayStatus(x))}</span></span>`).join('')}</div></td></tr>`
+      ? `<tr class="detail" id="detail-${i}" hidden><td colspan="6"><div class="detail-list">${g.map(x => `<span class="detail-item"><b>${displayDate(x.date)}</b> <span class="pill ${statusClass(x)}">${escapeHtml(displayStatus(x))}</span></span>`).join('')}</div></td></tr>`
       : '';
-    return `<tr><td>${displayDate(r.date)}</td><td>${escapeHtml(r.name || '—')}${badge}</td><td>${escapeHtml(r.department || '—')}</td><td>${escapeHtml(r.designation || '—')}</td><td><span class="pill ${statusClass(r)}">${escapeHtml(displayStatus(r))}</span></td></tr>${detail}`;
+    return `<tr><td>${displayDate(r.date)}</td><td>${escapeHtml(r.name || '—')}${badge}</td><td>${escapeHtml(r.id || '—')}</td><td>${escapeHtml(r.department || '—')}</td><td>${escapeHtml(r.designation || '—')}</td><td><span class="pill ${statusClass(r)}">${escapeHtml(displayStatus(r))}</span></td></tr>${detail}`;
   }).join(''); }
 function groupRows(data){
   const map = new Map();
@@ -351,19 +362,51 @@ function renderDesignationSummary(data){ const groups = {};
   data.forEach(r => { const name = r.department || 'Not specified'; if (!groups[name]) groups[name] = {absent:0, late:0, leave:0};
     const category = attendanceCategory(r); if (category === 'absent' || category === 'late' || category === 'leave') groups[name][category]++; });
   const items = Object.entries(groups).filter(([,n]) => n.absent+n.late+n.leave > 0).sort((a,b) => a[0].localeCompare(b[0]));
-  $('designationSummary').innerHTML = items.length ? `<table><thead><tr><th>Department</th><th>Absent</th><th>Late</th><th>Leave</th></tr></thead><tbody>${items.map(([name,n]) => `<tr><td>${escapeHtml(name)}</td><td class="count-absent">${n.absent}</td><td class="count-late">${n.late}</td><td class="count-leave">${n.leave}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">No absent, late, or leave records.</div>'; }
-function renderLegend(data){
-  const labels = {present:'Present', absent:'Absent', late:'Late', leave:'Leave', offday:'Off day'};
-  const colors = {present:'#198754', absent:'#e64a3c', late:'#f59e0b', leave:'#805ad5', offday:'#0891b2'};
-  const counts = {}; data.forEach(r => { const category = attendanceCategory(r) || 'other'; counts[category] = (counts[category] || 0) + 1; });
-  const items = Object.entries(counts).sort((a,b) => b[1]-a[1]);
-  $('legend').innerHTML = items.length ? items.map(([s,n]) => `<span><i class="dot" style="background:${colors[s] || '#64748b'}"></i>${labels[s] || 'Other'}</span><strong>${n}</strong>`).join('') : '<span>No data</span><strong>0</strong>'; }
+  const cell = (name, cat, value, cls) => `<td class="click ${cls}" data-dept="${escapeHtml(name)}" data-cat="${cat}" title="Show in Attendance records">${value}</td>`;
+  $('designationSummary').innerHTML = items.length ? `<table><thead><tr><th>Department</th><th>Absent</th><th>Late</th><th>Leave</th></tr></thead><tbody>${items.map(([name,n]) => `<tr>${cell(name,'',escapeHtml(name),'')}${cell(name,'absent',n.absent,'count-absent')}${cell(name,'late',n.late,'count-late')}${cell(name,'leave',n.leave,'count-leave')}</tr>`).join('')}</tbody></table>` : '<div class="empty">No absent, late, or leave records.</div>'; }
+function renderDeductionSummary(){
+  const groups = {};
+  deductionRows().forEach(r => { const name = r.department || 'Not specified'; const id = staffIdentity(r); if (!id) return; if (!groups[name]) groups[name] = new Set(); groups[name].add(id); });
+  const items = Object.entries(groups).map(([name,s]) => [name, s.size]).sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0]));
+  const total = items.reduce((sum,[,n]) => sum+n, 0);
+  $('deductionSummary').innerHTML = items.length
+    ? `<table><thead><tr><th>Department</th><th>Staff</th></tr></thead><tbody>${items.map(([name,n]) => `<tr><td class="click" data-dept="${escapeHtml(name)}" data-cat="deduction" title="Show in Attendance records">${escapeHtml(name)}</td><td class="click count-deduction" data-dept="${escapeHtml(name)}" data-cat="deduction">${n}</td></tr>`).join('')}</tbody><tfoot><tr><td>Total</td><td class="count-deduction">${total}</td></tr></tfoot></table>`
+    : `<div class="empty">No staff with ${DEDUCTION_MIN_DAYS}+ days at 10:06 AM or later in the selected dates.</div>`;
+}
+function summaryClick(e){
+  const td = e.target.closest('td[data-dept]'); if (!td) return;
+  state.tableDept = td.dataset.dept; state.category = td.dataset.cat; render();
+  document.querySelector('.table-panel').scrollIntoView({behavior:'smooth', block:'start'});
+}
+function downloadExcel(){
+  if (!window.XLSX){ setStatus('The Excel library did not load. Check your internet connection and refresh.', true); return; }
+  const rows = filtered();
+  if (!rows.length){ setStatus('There are no records to download for the selected filters.', true); return; }
+  let lateDays = null;
+  if (state.category === 'deduction'){ lateDays = new Map(); rows.forEach(r => { const id = staffIdentity(r); if (!lateDays.has(id)) lateDays.set(id, new Set()); lateDays.get(id).add(r.date); }); }
+  const out = rows.map(r => {
+    const o = { 'Date': displayDate(r.date), 'Staff name': r.name, 'Staff ID': r.id, 'Department': r.department, 'Designation': r.designation, 'Entry time': formatEntryTime(r.entryTime) || text(r.entryTime), 'Status': displayStatus(r) };
+    if (lateDays) o['Days at 10:06 AM or later'] = lateDays.get(staffIdentity(r)).size;
+    return o; });
+  const ws = XLSX.utils.json_to_sheet(out);
+  ws['!cols'] = [{wch:12},{wch:28},{wch:12},{wch:36},{wch:28},{wch:12},{wch:32},{wch:24}];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
+  const from = $('dateFrom').value, to = $('dateTo').value;
+  const parts = ['attendance', state.category || 'all'];
+  if (state.tableDept) parts.push(state.tableDept.replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,''));
+  parts.push(from === to ? displayDate(from) : `${displayDate(from)}_to_${displayDate(to)}`);
+  XLSX.writeFile(wb, parts.join('_') + '.xlsx');
+}
 function escapeHtml(value){ return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
 $('dateFrom').addEventListener('change', render);
 $('dateTo').addEventListener('change', render);
-$('department').addEventListener('change', render);
+$('department').addEventListener('change', () => { state.tableDept = ''; render(); });
+$('designationSummary').addEventListener('click', summaryClick);
+$('deductionSummary').addEventListener('click', summaryClick);
+$('clearDept').addEventListener('click', () => { state.tableDept = ''; render(); });
+$('download').addEventListener('click', downloadExcel);
 $('search').addEventListener('input', render);
-document.querySelectorAll('[data-category]').forEach(card => { card.addEventListener('click', () => { state.category = card.dataset.category; render(); document.querySelector('.table-panel').scrollIntoView({behavior:'smooth', block:'start'}); }); });
+document.querySelectorAll('[data-category]').forEach(card => { card.addEventListener('click', () => { state.category = card.dataset.category; state.tableDept = ''; render(); document.querySelector('.table-panel').scrollIntoView({behavior:'smooth', block:'start'}); }); });
 $('reload').addEventListener('click', loadWorkbook);
 $('reset').addEventListener('click', resetFilters);
 $('rows').addEventListener('click', e => {
